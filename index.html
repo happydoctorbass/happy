@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Happy birthday baby</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+   
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
+            "@tweenjs/tween.js": "https://unpkg.com/@tweenjs/tween.js@21.0.0/dist/tween.esm.js"
+        }
+    }
+    </script>
+
+    <!-- Скрипты -->
+    <script type="module" src="main.js"></script>
+    <script type="module" src="camera_controller.js"></script>
+    <script type="module" src="camera_info_display.js"></script>
+    <!-- !!! ДОБАВЛЯЕМ НОВЫЙ СКРИПТ ДЛЯ ФОТО !!! -->
+    <script type="module" src="photo_placer.js"></script>
+
+</body>
+</html>
