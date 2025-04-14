@@ -1,4 +1,4 @@
-/* Файл: style.css */
+
 body {
     margin: 0;
     overflow: hidden;
@@ -6,15 +6,12 @@ body {
     font-family: sans-serif;
 }
 
+
 canvas {
     display: block;
-    touch-action: none; /* Оставляем это, важно для предотвращения конфликтов */
+    touch-action: none;
 }
 
-/* Курсор теперь будет отображаться по умолчанию */
-/* canvas:hover {
-    cursor: none;
-} */
 
 #autoplayButton {
     position: absolute;
@@ -34,12 +31,13 @@ canvas {
     background-color: rgba(0, 0, 0, 0.8);
 }
 
+
 #cameraInfoDisplay {
     position: absolute;
     top: 15px;
     right: 15px;
     padding: 8px 12px;
-    font-family: Consolas, Monaco, 'Andale Mono', 'Ubuntu Mono', monospace;
+    font-family: Consolas, monospace;
     font-size: 13px;
     color: #333;
     background-color: rgba(255, 255, 255, 0.75);
@@ -50,6 +48,7 @@ canvas {
     text-align: left;
     min-width: 280px;
 }
+
 
 #controlsInfo {
     position: absolute;
@@ -63,4 +62,18 @@ canvas {
     z-index: 10;
     pointer-events: none;
     line-height: 1.4;
+}
+
+@media (max-width: 600px) {
+    #autoplayButton,
+    #cameraInfoDisplay,
+    #controlsInfo {
+        padding: 6px 10px;
+        font-size: 12px;
+    }
+
+    #cameraInfoDisplay {
+        min-width: auto;
+        max-width: 90vw;
+    }
 }
