@@ -22,9 +22,9 @@ let currentWaypointIndex = -1;
 let isAutoTourActive = false;
 let autoTourTimeoutId = null;
 
-export const TWEEN_DURATION = 2800; 
-export const FLY_IN_DURATION = 3500; 
-const AUTO_TOUR_PAUSE_DURATION = 1800; 
+export const TWEEN_DURATION = 2800;
+export const FLY_IN_DURATION = 3500;
+const AUTO_TOUR_PAUSE_DURATION = 1800;
 const CAMERA_BOUNDS_PADDING = 0.5;
 const TARGET_BOUNDS_PADDING = 0.2;
 
@@ -54,77 +54,84 @@ export function registerAnimationUpdateCallback(callback) {
     }
 }
 
-function animateToFixedWaypoint(index) {
-    if (isAnimatingManualStep || !waypoints[index]) return;
+function startWaypointAnimation(index, isAutoStep = false) {
+    if (!waypoints[index]) return;
+    if (!isAutoStep && isAnimatingManualStep) return;
 
     const waypoint = waypoints[index];
-    console.log(`Начинаем РУЧНОЙ переход к точке ${index}`);
-    isAnimatingManualStep = true;
+    const startPos = camera.position.clone();
+    const startTarget = controls.target.clone();
+    const endPos = waypoint.cameraPos;
+    const endTarget = waypoint.targetPos;
+
+    if (isAutoStep) {
+        console.log(`Авто-тур: Переход к точке ${index}`);
+        isAnimatingManualStep = false;
+    } else {
+        console.log(`Начинаем РУЧНОЙ переход к точке ${index}`);
+        isAnimatingManualStep = true;
+    }
+
     if (controls) controls.enabled = false;
     tweenGroup.removeAll();
 
-    new TWEEN.Tween(camera.position, tweenGroup)
-        .to(waypoint.cameraPos, TWEEN_DURATION)
-        .easing(TWEEN.Easing.Cubic.InOut) // <<< Изменено
-        .start();
+    const progress = { t: 0 };
 
-    new TWEEN.Tween(controls.target, tweenGroup)
-        .to(waypoint.targetPos, TWEEN_DURATION)
-        .easing(TWEEN.Easing.Cubic.InOut) // <<< Изменено
+    new TWEEN.Tween(progress, tweenGroup)
+        .to({ t: 1 }, TWEEN_DURATION)
+        .easing(TWEEN.Easing.Cubic.InOut)
+        .onUpdate(() => {
+            camera.position.lerpVectors(startPos, endPos, progress.t);
+            const interpolatedTarget = new THREE.Vector3().lerpVectors(startTarget, endTarget, progress.t);
+            camera.lookAt(interpolatedTarget);
+            controls.target.copy(interpolatedTarget);
+        })
         .onComplete(() => {
-            console.log(`Ручной переход завершен в точке ${index}`);
+            console.log(`Переход завершен в точке ${index}`);
+            camera.position.copy(endPos);
+            controls.target.copy(endTarget);
+            camera.lookAt(endTarget);
+
             isAnimatingManualStep = false;
             currentWaypointIndex = index;
+
             if (controls) {
                 controls.enabled = true;
                 controls.update();
             }
-            updateTourButtonsUI();
+
+            if (!isAutoStep) {
+                updateTourButtonsUI();
+            }
+
+            if (isAutoStep && isAutoTourActive) {
+                 const nextIndex = (index + 1) % waypoints.length;
+                 console.log(`Авто-тур: Планируем переход к точке ${nextIndex} через ${AUTO_TOUR_PAUSE_DURATION} мс`);
+                 if (autoTourTimeoutId) clearTimeout(autoTourTimeoutId);
+                 autoTourTimeoutId = setTimeout(() => {
+                     if (isAutoTourActive) {
+                         startWaypointAnimation(nextIndex, true);
+                     }
+                 }, AUTO_TOUR_PAUSE_DURATION);
+            } else if (isAutoStep && !isAutoTourActive) {
+                 updateTourButtonsUI();
+            }
         })
         .start();
+
+     updateTourButtonsUI();
+}
+
+function animateToFixedWaypoint(index) {
+    if (isAutoTourActive) {
+       console.warn("animateToFixedWaypoint вызван во время активного авто-тура. Используйте stopAutoTour() сначала.");
+       stopAutoTour();
+    }
+     startWaypointAnimation(index, false);
 }
 
 function animateAutoTourStep(index) {
-    if (!isAutoTourActive || !waypoints[index]) {
-        console.log("animateAutoTourStep: Авто-тур не активен или индекс некорректен, выход.");
-        if (!isAutoTourActive && controls) controls.enabled = true;
-        return;
-    }
-
-    const waypoint = waypoints[index];
-    console.log(`Авто-тур: Переход к точке ${index}`);
-    isAnimatingManualStep = false;
-    if (controls) controls.enabled = false;
-    tweenGroup.removeAll();
-
-    new TWEEN.Tween(camera.position, tweenGroup)
-        .to(waypoint.cameraPos, TWEEN_DURATION)
-        .easing(TWEEN.Easing.Cubic.InOut) 
-        .start();
-
-    new TWEEN.Tween(controls.target, tweenGroup)
-        .to(waypoint.targetPos, TWEEN_DURATION)
-        .easing(TWEEN.Easing.Cubic.InOut) 
-        .onComplete(() => {
-            if (!isAutoTourActive) return;
-
-            console.log(`Авто-тур: Достигнута точка ${index}`);
-            currentWaypointIndex = index;
-
-            const nextIndex = (index + 1) % waypoints.length;
-            console.log(`Авто-тур: Планируем переход к точке ${nextIndex} через ${AUTO_TOUR_PAUSE_DURATION} мс`);
-
-            if (autoTourTimeoutId) {
-                clearTimeout(autoTourTimeoutId);
-            }
-
-            autoTourTimeoutId = setTimeout(() => {
-                if (isAutoTourActive) {
-                    animateAutoTourStep(nextIndex);
-                }
-            }, AUTO_TOUR_PAUSE_DURATION);
-        })
-        .start();
+     startWaypointAnimation(index, true);
 }
 
 export function startAutoTour() {
@@ -142,7 +149,6 @@ export function startAutoTour() {
     if (controls) controls.enabled = false;
     const startIndex = (currentWaypointIndex + 1) % waypoints.length;
     animateAutoTourStep(startIndex);
-    updateTourButtonsUI();
 }
 
 export function stopAutoTour() {
@@ -203,27 +209,30 @@ function updateTourButtonsUI() {
     nextButton.style.display = 'inline-block';
     prevButton.style.display = 'inline-block';
 
-    const disableNavButtons = isAutoTourActive || isAnimatingManualStep;
-    nextButton.disabled = disableNavButtons;
-    prevButton.disabled = disableNavButtons;
-    startButton.disabled = disableNavButtons;
+    const disableAllTourButtons = isAnimatingManualStep || isAutoTourActive;
+    nextButton.disabled = disableAllTourButtons;
+    prevButton.disabled = disableAllTourButtons;
+    startButton.disabled = disableAllTourButtons;
+    stopButton.disabled = !isAutoTourActive;
 }
 
-
 function handleControlStart() {
-    if (isAnimatingManualStep) {
-        console.log('OrbitControls: Interaction Start - Stopping manual animation.');
-        tweenGroup.removeAll();
+    if (isAnimatingManualStep || isAutoTourActive) {
+        console.log('OrbitControls: Interaction Start - Stopping active animation/tour.');
+        if (isAutoTourActive) {
+            isAutoTourActive = false;
+            if (autoTourTimeoutId) {
+               clearTimeout(autoTourTimeoutId);
+               autoTourTimeoutId = null;
+            }
+        }
         isAnimatingManualStep = false;
+        tweenGroup.removeAll();
         if (controls) controls.enabled = true;
         currentWaypointIndex = -1;
         updateTourButtonsUI();
-    } else if (isAutoTourActive) {
-        console.log('OrbitControls: Interaction Start - Stopping AUTO tour.');
-        stopAutoTour();
-        currentWaypointIndex = -1;
     } else {
-         console.log('OrbitControls: Interaction Start (no active tour)');
+         console.log('OrbitControls: Interaction Start (no active tour/animation)');
          if(currentWaypointIndex !== -1) {
             currentWaypointIndex = -1;
          }
@@ -233,9 +242,9 @@ function handleControlStart() {
 function handleKeyPress(event) {
     if (document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA')) return;
 
-    if (!isAutoTourActive && (event.code === 'Space' || event.code === 'Enter')) {
+    if (!isAutoTourActive && !isAnimatingManualStep && (event.code === 'Space' || event.code === 'Enter')) {
         event.preventDefault();
-        if (isAnimatingManualStep || !controls || !controls.enabled) return;
+        if (!controls || !controls.enabled) return;
 
         console.log(`Нажата клавиша ${event.code}. Ручной переход.`);
         goToNextWaypoint();
@@ -250,60 +259,64 @@ function onLoadModel(gltf) {
     const box = new THREE.Box3().setFromObject(model);
     const size = box.getSize(new THREE.Vector3());
     const center = box.getCenter(new THREE.Vector3());
-
     const minBounds = box.min.clone().subScalar(CAMERA_BOUNDS_PADDING);
     const maxBounds = box.max.clone().addScalar(CAMERA_BOUNDS_PADDING);
     minBounds.y = Math.max(minBounds.y, 0.1);
     maxBounds.y += CAMERA_BOUNDS_PADDING * 2;
     roomBounds = new THREE.Box3(minBounds, maxBounds);
-
     const targetMin = box.min.clone().addScalar(TARGET_BOUNDS_PADDING);
     const targetMax = box.max.clone().subScalar(TARGET_BOUNDS_PADDING);
     targetMin.y = Math.max(targetMin.y, 0.2);
     targetMax.y = Math.min(targetMax.y, box.max.y - TARGET_BOUNDS_PADDING * 0.5);
     targetBounds = new THREE.Box3(targetMin, targetMax);
-
     if (controls) {
         controls.maxDistance = size.length() * 1.5;
         controls.minDistance = 0.3;
-        controls.target.copy(finalTargetPos);
-        console.log('Начальная цель OrbitControls установлена на точку 0.');
-        controls.update();
+        console.log('Начальная цель OrbitControls будет установлена анимацией прилета.');
     }
 
     const startFlyInPos = new THREE.Vector3(center.x, center.y + size.y, center.z + size.length() * 1.2);
+    const startFlyInTarget = center.clone();
     camera.position.copy(startFlyInPos);
+    controls.target.copy(startFlyInTarget);
+    camera.lookAt(startFlyInTarget);
+    controls.update();
+
     currentWaypointIndex = -1;
     if (controls) controls.enabled = false;
 
     console.log('Начало анимации прилета к точке 0...');
     tweenGroup.removeAll();
 
-    new TWEEN.Tween(camera.position, tweenGroup)
-        .to(finalCameraPos, FLY_IN_DURATION)
-        .easing(TWEEN.Easing.Cubic.InOut) 
-        .start();
+    const flyInProgress = { t: 0 };
 
-    new TWEEN.Tween(controls.target, tweenGroup)
-        .to(finalTargetPos, FLY_IN_DURATION)
-        .easing(TWEEN.Easing.Cubic.InOut) 
+    new TWEEN.Tween(flyInProgress, tweenGroup)
+        .to({ t: 1 }, FLY_IN_DURATION)
+        .easing(TWEEN.Easing.Cubic.InOut)
+        .onUpdate(() => {
+            camera.position.lerpVectors(startFlyInPos, finalCameraPos, flyInProgress.t);
+            const interpolatedTarget = new THREE.Vector3().lerpVectors(startFlyInTarget, finalTargetPos, flyInProgress.t);
+            camera.lookAt(interpolatedTarget);
+            controls.target.copy(interpolatedTarget);
+        })
         .onComplete(() => {
             console.log('Анимация прилета завершена в точке 0.');
+            camera.position.copy(finalCameraPos);
+            controls.target.copy(finalTargetPos);
+            camera.lookAt(finalTargetPos);
+
             currentWaypointIndex = 0;
             if (controls) {
                 controls.enabled = true;
                 controls.update();
             }
-            isAnimatingManualStep = false;
 
             console.log("main.js: Вызов initPhotoOverlays() после прилета...");
             initPhotoOverlays();
 
             updateTourButtonsUI();
-
         })
         .start();
-
 }
 
 function onProgress(xhr) { console.log((xhr.loaded / xhr.total * 100) + '% loaded'); }
@@ -380,9 +393,8 @@ function animate(time) {
         callback(delta);
     }
 
-    if (controls && controls.enabled) {
+    if (controls && controls.enabled && !isAnimatingManualStep && !isAutoTourActive) {
         controls.update(delta);
-
         if (targetBounds && controls.target) {
             controls.target.clamp(targetBounds.min, targetBounds.max);
         }
