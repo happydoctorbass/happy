@@ -65,12 +65,12 @@ function animateToFixedWaypoint(index) {
 
     new TWEEN.Tween(camera.position, tweenGroup)
         .to(waypoint.cameraPos, TWEEN_DURATION)
-        .easing(TWEEN.Easing.Cubic.InOut) 
+        .easing(TWEEN.Easing.Cubic.InOut) // <<< Изменено
         .start();
 
     new TWEEN.Tween(controls.target, tweenGroup)
         .to(waypoint.targetPos, TWEEN_DURATION)
-        .easing(TWEEN.Easing.Cubic.InOut) 
+        .easing(TWEEN.Easing.Cubic.InOut) // <<< Изменено
         .onComplete(() => {
             console.log(`Ручной переход завершен в точке ${index}`);
             isAnimatingManualStep = false;
