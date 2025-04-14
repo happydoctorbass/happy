@@ -1,4 +1,4 @@
-// Файл: main.js
+
 
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
@@ -22,9 +22,9 @@ let currentWaypointIndex = -1;
 let isAutoTourActive = false;
 let autoTourTimeoutId = null;
 
-export const TWEEN_DURATION = 2000;
-export const FLY_IN_DURATION = 3000;
-const AUTO_TOUR_PAUSE_DURATION = 1500;
+export const TWEEN_DURATION = 2800; 
+export const FLY_IN_DURATION = 3500; 
+const AUTO_TOUR_PAUSE_DURATION = 1800; 
 const CAMERA_BOUNDS_PADDING = 0.5;
 const TARGET_BOUNDS_PADDING = 0.2;
 
@@ -65,12 +65,12 @@ function animateToFixedWaypoint(index) {
 
     new TWEEN.Tween(camera.position, tweenGroup)
         .to(waypoint.cameraPos, TWEEN_DURATION)
-        .easing(TWEEN.Easing.Quadratic.InOut)
+        .easing(TWEEN.Easing.Cubic.InOut) 
         .start();
 
     new TWEEN.Tween(controls.target, tweenGroup)
         .to(waypoint.targetPos, TWEEN_DURATION)
-        .easing(TWEEN.Easing.Quadratic.InOut)
+        .easing(TWEEN.Easing.Cubic.InOut) 
         .onComplete(() => {
             console.log(`Ручной переход завершен в точке ${index}`);
             isAnimatingManualStep = false;
@@ -99,12 +99,12 @@ function animateAutoTourStep(index) {
 
     new TWEEN.Tween(camera.position, tweenGroup)
         .to(waypoint.cameraPos, TWEEN_DURATION)
-        .easing(TWEEN.Easing.Quadratic.InOut)
+        .easing(TWEEN.Easing.Cubic.InOut) 
         .start();
 
     new TWEEN.Tween(controls.target, tweenGroup)
         .to(waypoint.targetPos, TWEEN_DURATION)
-        .easing(TWEEN.Easing.Quadratic.InOut)
+        .easing(TWEEN.Easing.Cubic.InOut) 
         .onComplete(() => {
             if (!isAutoTourActive) return;
 
@@ -206,7 +206,7 @@ function updateTourButtonsUI() {
     const disableNavButtons = isAutoTourActive || isAnimatingManualStep;
     nextButton.disabled = disableNavButtons;
     prevButton.disabled = disableNavButtons;
-    startButton.disabled = disableNavButtons; // Можно и старт отключать на время анимации
+    startButton.disabled = disableNavButtons;
 }
 
 
@@ -281,12 +281,12 @@ function onLoadModel(gltf) {
 
     new TWEEN.Tween(camera.position, tweenGroup)
         .to(finalCameraPos, FLY_IN_DURATION)
-        .easing(TWEEN.Easing.Quadratic.InOut)
+        .easing(TWEEN.Easing.Cubic.InOut) 
         .start();
 
     new TWEEN.Tween(controls.target, tweenGroup)
         .to(finalTargetPos, FLY_IN_DURATION)
-        .easing(TWEEN.Easing.Quadratic.InOut)
+        .easing(TWEEN.Easing.Cubic.InOut) 
         .onComplete(() => {
             console.log('Анимация прилета завершена в точке 0.');
             currentWaypointIndex = 0;
