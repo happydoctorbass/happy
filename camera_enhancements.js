@@ -1,116 +1,154 @@
 // Файл: camera_controller.js
 
-import * as THREE from 'three'; // Нужен для векторов
+import * as THREE from 'three';
 import {
-    camera,                 // Импортируем камеру
-    controls,               // Импортируем OrbitControls
-    targetBounds,           // Импортируем границы для цели
-    registerAnimationUpdateCallback // Импортируем функцию регистрации
-} from './main.js';          // Убедись, что путь правильный!
+    camera,
+    controls,
+    model,
+    renderer,
+    registerAnimationUpdateCallback
+} from './main.js';
 
-console.log("Модуль camera_controller.js загружен.");
+console.log("Модуль camera_controller.js (WASD + OrbitControls + Manual Touch Rotate) загружен.");
 
-// --- Настройки управления ---
-const PAN_SPEED = 2.5; // Скорость движения цели (можно настроить)
-const keyState = {};   // Объект для хранения состояния нажатых клавиш
+const MOVEMENT_SPEED = 3.0;
+const COLLISION_DISTANCE = 0.4;
+const MANUAL_TOUCH_ROTATE_SPEED = 2.5;
 
-// --- Функция обновления панорамирования цели ---
-function updateTargetPanning(deltaTime) {
-    // Выполняем только если controls существуют, включены и есть камера
-    if (!controls || !controls.enabled || !camera) {
-        // Сбрасываем состояние клавиш, если управление отключено
+const keyState = {};
+const raycaster = new THREE.Raycaster();
+const movementVector = new THREE.Vector3();
+const cameraDirection = new THREE.Vector3();
+const rightDirection = new THREE.Vector3();
+const nextCameraPosition = new THREE.Vector3();
+
+let isManualRotating = false;
+let previousTouchX = 0;
+let previousTouchY = 0;
+
+function checkCollision(moveVec) {
+    if (!model || moveVec.lengthSq() < 0.0001) return false;
+    nextCameraPosition.copy(camera.position).add(moveVec);
+    const rayOrigin = nextCameraPosition.clone();
+    const rayDirection = moveVec.clone().negate().normalize();
+    raycaster.set(rayOrigin, rayDirection);
+    raycaster.far = moveVec.length() + 0.1;
+    const intersects = raycaster.intersectObject(model, true);
+    if (intersects.length > 0) {
+        for (let i = 0; i < intersects.length; i++) {
+            if (intersects[i].distance < moveVec.length() + 0.05) {
+                 if (intersects[i].face && intersects[i].face.normal.y > 0.7) continue;
+                 return true;
+            }
+        }
+    }
+    return false;
+}
+
+function updateMovementWASD(deltaTime) {
+    if (!controls || !controls.enabled) {
         for (const key in keyState) { keyState[key] = false; }
         return;
     }
-
-    const moveDirection = new THREE.Vector3(0, 0, 0);
-    if (keyState['KeyW']) moveDirection.z = -1;
-    if (keyState['KeyS']) moveDirection.z = 1;
-    if (keyState['KeyA']) moveDirection.x = -1;
-    if (keyState['KeyD']) moveDirection.x = 1;
-    // Можно добавить Q/E для вертикального панорамирования
-    // if (keyState['KeyQ']) moveDirection.y = -1;
-    // if (keyState['KeyE']) moveDirection.y = 1;
-
-    if (moveDirection.lengthSq() > 0.001) { // Если есть движение
-        // Получаем прямое и правое направления камеры в горизонтальной плоскости
-        const cameraDirection = new THREE.Vector3();
-        camera.getWorldDirection(cameraDirection);
-        const forward = new THREE.Vector3(cameraDirection.x, 0, cameraDirection.z).normalize();
-        // Обработка случая, если смотрим строго вверх/вниз
-        if (forward.lengthSq() < 0.001) {
-            forward.set(0, 0, -Math.sign(camera.up.y * cameraDirection.y)); // Направление по Z в зависимости от наклона
+    camera.getWorldDirection(cameraDirection);
+    cameraDirection.y = 0;
+    cameraDirection.normalize();
+    rightDirection.crossVectors(camera.up, cameraDirection).normalize();
+    movementVector.set(0, 0, 0);
+    let moveSpeedFactor = 1.0;
+    if (keyState['KeyW']) movementVector.add(cameraDirection);
+    if (keyState['KeyS']) movementVector.sub(cameraDirection);
+    if (keyState['KeyA']) movementVector.add(rightDirection);
+    if (keyState['KeyD']) movementVector.sub(rightDirection);
+    if (movementVector.lengthSq() > 0.0001) {
+        movementVector.normalize().multiplyScalar(MOVEMENT_SPEED * deltaTime * moveSpeedFactor);
+        if (!checkCollision(movementVector)) {
+            camera.position.add(movementVector);
+            controls.target.add(movementVector);
         }
-        const right = new THREE.Vector3().crossVectors(camera.up, forward).normalize();
-
-        // Собираем вектор смещения на основе нажатых клавиш
-        const panOffset = new THREE.Vector3();
-        if (keyState['KeyW']) panOffset.add(forward);
-        if (keyState['KeyS']) panOffset.sub(forward);
-        if (keyState['KeyA']) panOffset.sub(right);
-        if (keyState['KeyD']) panOffset.add(right);
-
-        // Добавляем вертикальное смещение, если нужно (KeyQ/KeyE)
-        // const verticalOffset = new THREE.Vector3(0, 1, 0);
-        // if (keyState['KeyE']) panOffset.add(verticalOffset);
-        // if (keyState['KeyQ']) panOffset.sub(verticalOffset);
-
-        // Нормализуем, умножаем на скорость и deltaTime
-        panOffset.normalize().multiplyScalar(PAN_SPEED * deltaTime);
-
-        // Применяем смещение к цели controls.target
-        controls.target.add(panOffset);
-
-        // Ограничение цели останется в главном цикле animate(),
-        // который вызывается после этого колбэка.
-        // Это нормально, т.к. controls.target будет ограничен перед рендерингом.
     }
 }
 
-// --- Настройка слушателей событий ---
-function setupEventListeners() {
-    window.addEventListener('keydown', (e) => {
-        // Игнорируем ввод в поля ввода
-        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-        // Отслеживаем WASD (и Q/E, если нужно)
-        if (['KeyW', 'KeyA', 'KeyS', 'KeyD'/*, 'KeyQ', 'KeyE'*/].includes(e.code)) {
-            // Не устанавливаем true, если controls выключены (например, во время тура)
-            if (controls && controls.enabled) {
-                 keyState[e.code] = true;
-            }
-            // Предотвращаем прокрутку страницы клавишами W/S (если нужно)
-             // e.preventDefault();
-        }
-    });
-
-    window.addEventListener('keyup', (e) => {
-        if (keyState[e.code]) {
-            keyState[e.code] = false;
-        }
-    });
-
-     // Сбрасываем клавиши, если окно теряет фокус
-     window.addEventListener('blur', () => {
-        for (const key in keyState) { keyState[key] = false; }
-     });
-
-    console.log("Слушатели для WASD управления целью камеры добавлены.");
-}
-
-// --- Инициализация модуля ---
-function initCameraController() {
-    // Небольшая проверка, что controls уже созданы (хотя при type=module это обычно так)
-    if (controls && camera) {
-        setupEventListeners();
-        // Регистрируем нашу функцию обновления в основном цикле анимации
-        registerAnimationUpdateCallback(updateTargetPanning);
-        console.log("Кастомный контроллер камеры инициализирован. Используйте WASD для панорамирования цели.");
+function onTouchStart(event) {
+    if (event.touches.length === 1 && controls && controls.enabled) {
+        isManualRotating = true;
+        previousTouchX = event.touches[0].clientX;
+        previousTouchY = event.touches[0].clientY;
+        console.log("Manual Touch Rotate Start");
     } else {
-        // Повторная попытка через короткое время, если controls еще не готовы
-        console.warn("Controls или Camera еще не готовы, повторная попытка инициализации контроллера камеры через 100мс.");
-        setTimeout(initCameraController, 100);
+        isManualRotating = false;
     }
 }
 
-// Запускаем инициализацию нашего контроллера
-initCameraController();
+function onTouchMove(event) {
+    if (!isManualRotating || event.touches.length !== 1 || !controls || !controls.enabled) {
+        isManualRotating = false;
+        return;
+    }
+
+    const currentX = event.touches[0].clientX;
+    const currentY = event.touches[0].clientY;
+
+    const deltaX = currentX - previousTouchX;
+    const deltaY = currentY - previousTouchY;
+
+    if (controls.rotateLeft && controls.rotateUp) {
+        const rotateScale = MANUAL_TOUCH_ROTATE_SPEED * (Math.PI / renderer.domElement.clientHeight);
+        controls.rotateLeft(deltaX * rotateScale);
+        controls.rotateUp(deltaY * rotateScale);
+        controls.update();
+    } else {
+        console.warn("controls.rotateLeft/rotateUp не найдены. Ручное вращение не сработает.");
+        isManualRotating = false;
+    }
+
+    previousTouchX = currentX;
+    previousTouchY = currentY;
+}
+
+function onTouchEnd(event) {
+    if (isManualRotating) {
+        console.log("Manual Touch Rotate End");
+    }
+    isManualRotating = false;
+}
+
+function setupEventListeners() {
+    window.addEventListener('keydown', (event) => {
+        if (document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA')) return;
+        if (['KeyW', 'KeyA', 'KeyS', 'KeyD'].includes(event.code)) {
+             keyState[event.code] = true;
+        }
+    });
+    window.addEventListener('keyup', (event) => {
+        if (keyState[event.code]) keyState[event.code] = false;
+    });
+    window.addEventListener('blur', () => {
+        for (const key in keyState) { keyState[key] = false; }
+    });
+
+    if (renderer && renderer.domElement) {
+        renderer.domElement.addEventListener('touchstart', onTouchStart, { passive: false });
+        renderer.domElement.addEventListener('touchmove', onTouchMove, { passive: false });
+        renderer.domElement.addEventListener('touchend', onTouchEnd);
+        renderer.domElement.addEventListener('touchcancel', onTouchEnd);
+        console.log("Слушатели для ручного тач-вращения добавлены.");
+    } else {
+         console.error("Не удалось добавить слушатели тач-событий: renderer.domElement не найден.");
+    }
+
+    console.log("Слушатели WASD и Touch для OrbitControls добавлены.");
+}
+
+function initController() {
+    if (controls && camera && model && renderer) {
+        setupEventListeners();
+        registerAnimationUpdateCallback(updateMovementWASD);
+        console.log("Контроллер WASD и ручного тач-вращения инициализирован.");
+    } else {
+        console.warn("OrbitControls, Camera, Model или Renderer еще не готовы, повторная попытка инициализации контроллера через 100мс.");
+        setTimeout(initController, 100);
+    }
+}
+
+initController();
