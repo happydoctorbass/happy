@@ -1,4 +1,4 @@
-// Файл: camera_controller.js
+
 
 import * as THREE from 'three';
 import {
