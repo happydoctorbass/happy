@@ -1,16 +1,13 @@
 // Файл: main.js
 
-// Импорты: OrbitControls, TWEEN и GLTFLoader
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import TWEEN from '@tweenjs/tween.js';
 
-// --- ИМПОРТИРУЕМ ФУНКЦИЮ ИЗ МОДУЛЯ ДЛЯ ФОТО ---
-import { initPhotoOverlays } from './photo_placer.js'; // Убедись, что путь './photo_placer.js' верный
+import { initPhotoOverlays } from './photo_placer.js';
 
-// --- Экспортируемые переменные ---
-export let scene; // <-- Убедимся, что сцена экспортируется
+export let scene;
 export let camera;
 export let renderer;
 export let controls;
@@ -20,17 +17,17 @@ export let targetBounds;
 export let tweenGroup = new TWEEN.Group();
 export const clock = new THREE.Clock();
 
-// --- Внутренние переменные состояния ---
 let isAnimatingManualStep = false;
 let currentWaypointIndex = -1;
+let isAutoTourActive = false;
+let autoTourTimeoutId = null;
 
-// --- Константы ---
 export const TWEEN_DURATION = 2000;
 export const FLY_IN_DURATION = 3000;
+const AUTO_TOUR_PAUSE_DURATION = 1500;
 const CAMERA_BOUNDS_PADDING = 0.5;
 const TARGET_BOUNDS_PADDING = 0.2;
 
-// --- WAYPOINTS ---
 export const waypoints = [
     { cameraPos: new THREE.Vector3(0.1546, 1.7267, -0.0258), targetPos: new THREE.Vector3(-0.1229, 1.7523, -0.1369) },
     { cameraPos: new THREE.Vector3(-1.5995, 2.7991, -0.6406), targetPos: new THREE.Vector3(-1.8870, 2.8247, -0.7225) },
@@ -48,7 +45,6 @@ export const waypoints = [
 const finalCameraPos = waypoints[0].cameraPos;
 const finalTargetPos = waypoints[0].targetPos;
 
-// --- Механизм колбэков ---
 const animationUpdateCallbacks = [];
 export function registerAnimationUpdateCallback(callback) {
     if (typeof callback === 'function') {
@@ -58,22 +54,11 @@ export function registerAnimationUpdateCallback(callback) {
     }
 }
 
-// --- ЛОГИКА РУЧНОГО ТУРА ---
-function handleControlStart() {
-    if (isAnimatingManualStep) {
-        console.log('OrbitControls: Interaction Start - Stopping manual animation.');
-        isAnimatingManualStep = false;
-        tweenGroup.removeAll();
-        if (controls) controls.enabled = true;
-    } else {
-         console.log('OrbitControls: Interaction Start');
-    }
-}
-
 function animateToFixedWaypoint(index) {
     if (isAnimatingManualStep || !waypoints[index]) return;
+
     const waypoint = waypoints[index];
-    console.log(`Начинаем ручной переход к точке ${index}`);
+    console.log(`Начинаем РУЧНОЙ переход к точке ${index}`);
     isAnimatingManualStep = true;
     if (controls) controls.enabled = false;
     tweenGroup.removeAll();
@@ -94,46 +79,190 @@ function animateToFixedWaypoint(index) {
                 controls.enabled = true;
                 controls.update();
             }
+            updateTourButtonsUI();
         })
         .start();
 }
 
-function handleKeyPress(event) {
-    if (isAnimatingManualStep) return;
-    if (document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA')) return;
+function animateAutoTourStep(index) {
+    if (!isAutoTourActive || !waypoints[index]) {
+        console.log("animateAutoTourStep: Авто-тур не активен или индекс некорректен, выход.");
+        if (!isAutoTourActive && controls) controls.enabled = true;
+        return;
+    }
 
-    if (event.code === 'Space' || event.code === 'Enter') {
-        event.preventDefault();
-        if (!controls || !controls.enabled) return;
-        const nextIndex = (currentWaypointIndex + 1) % waypoints.length;
-        console.log(`Нажата клавиша ${event.code}. Переход от ${currentWaypointIndex} к ${nextIndex}`);
-        animateToFixedWaypoint(nextIndex);
+    const waypoint = waypoints[index];
+    console.log(`Авто-тур: Переход к точке ${index}`);
+    isAnimatingManualStep = false;
+    if (controls) controls.enabled = false;
+    tweenGroup.removeAll();
+
+    new TWEEN.Tween(camera.position, tweenGroup)
+        .to(waypoint.cameraPos, TWEEN_DURATION)
+        .easing(TWEEN.Easing.Quadratic.InOut)
+        .start();
+
+    new TWEEN.Tween(controls.target, tweenGroup)
+        .to(waypoint.targetPos, TWEEN_DURATION)
+        .easing(TWEEN.Easing.Quadratic.InOut)
+        .onComplete(() => {
+            if (!isAutoTourActive) return;
+
+            console.log(`Авто-тур: Достигнута точка ${index}`);
+            currentWaypointIndex = index;
+
+            const nextIndex = (index + 1) % waypoints.length;
+            console.log(`Авто-тур: Планируем переход к точке ${nextIndex} через ${AUTO_TOUR_PAUSE_DURATION} мс`);
+
+            if (autoTourTimeoutId) {
+                clearTimeout(autoTourTimeoutId);
+            }
+
+            autoTourTimeoutId = setTimeout(() => {
+                if (isAutoTourActive) {
+                    animateAutoTourStep(nextIndex);
+                }
+            }, AUTO_TOUR_PAUSE_DURATION);
+        })
+        .start();
+}
+
+export function startAutoTour() {
+    if (isAutoTourActive) {
+        console.log("Авто-тур уже запущен.");
+        return;
+    }
+    if (isAnimatingManualStep) {
+         tweenGroup.removeAll();
+         isAnimatingManualStep = false;
+    }
+
+    console.log("Запуск авто-тура...");
+    isAutoTourActive = true;
+    if (controls) controls.enabled = false;
+    const startIndex = (currentWaypointIndex + 1) % waypoints.length;
+    animateAutoTourStep(startIndex);
+    updateTourButtonsUI();
+}
+
+export function stopAutoTour() {
+    if (!isAutoTourActive) {
+        console.log("Авто-тур не был запущен.");
+        return;
+    }
+    console.log("Остановка авто-тура...");
+    isAutoTourActive = false;
+    if (autoTourTimeoutId) {
+        clearTimeout(autoTourTimeoutId);
+        autoTourTimeoutId = null;
+    }
+    tweenGroup.removeAll();
+    if (controls) {
+        controls.enabled = true;
+    }
+    isAnimatingManualStep = false;
+    updateTourButtonsUI();
+}
+
+export function goToNextWaypoint() {
+    console.log("Нажата кнопка 'Далее'");
+    if (isAutoTourActive) {
+        stopAutoTour();
+    }
+    const nextIndex = (currentWaypointIndex + 1) % waypoints.length;
+    animateToFixedWaypoint(nextIndex);
+}
+
+export function goToPrevWaypoint() {
+    console.log("Нажата кнопка 'Назад'");
+    if (isAutoTourActive) {
+        stopAutoTour();
+    }
+    const prevIndex = (currentWaypointIndex - 1 + waypoints.length) % waypoints.length;
+    animateToFixedWaypoint(prevIndex);
+}
+
+function updateTourButtonsUI() {
+    const startButton = document.getElementById('startTourButton');
+    const stopButton = document.getElementById('stopTourButton');
+    const nextButton = document.getElementById('nextTourButton');
+    const prevButton = document.getElementById('prevTourButton');
+
+    if (!startButton || !stopButton || !nextButton || !prevButton) {
+        return;
+    }
+
+    if (isAutoTourActive) {
+        startButton.style.display = 'none';
+        stopButton.style.display = 'inline-block';
+    } else {
+        startButton.style.display = 'inline-block';
+        stopButton.style.display = 'none';
+    }
+
+    nextButton.style.display = 'inline-block';
+    prevButton.style.display = 'inline-block';
+
+    const disableNavButtons = isAutoTourActive || isAnimatingManualStep;
+    nextButton.disabled = disableNavButtons;
+    prevButton.disabled = disableNavButtons;
+    startButton.disabled = disableNavButtons; // Можно и старт отключать на время анимации
+}
+
+
+function handleControlStart() {
+    if (isAnimatingManualStep) {
+        console.log('OrbitControls: Interaction Start - Stopping manual animation.');
+        tweenGroup.removeAll();
+        isAnimatingManualStep = false;
+        if (controls) controls.enabled = true;
+        currentWaypointIndex = -1;
+        updateTourButtonsUI();
+    } else if (isAutoTourActive) {
+        console.log('OrbitControls: Interaction Start - Stopping AUTO tour.');
+        stopAutoTour();
+        currentWaypointIndex = -1;
+    } else {
+         console.log('OrbitControls: Interaction Start (no active tour)');
+         if(currentWaypointIndex !== -1) {
+            currentWaypointIndex = -1;
+         }
     }
 }
 
-// --- ОБРАБОТЧИКИ ЗАГРУЗКИ МОДЕЛИ ---
+function handleKeyPress(event) {
+    if (document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA')) return;
+
+    if (!isAutoTourActive && (event.code === 'Space' || event.code === 'Enter')) {
+        event.preventDefault();
+        if (isAnimatingManualStep || !controls || !controls.enabled) return;
+
+        console.log(`Нажата клавиша ${event.code}. Ручной переход.`);
+        goToNextWaypoint();
+    }
+}
+
 function onLoadModel(gltf) {
     console.log('Модель успешно загружена');
     model = gltf.scene;
-    scene.add(model); // Добавляем модель в сцену
+    scene.add(model);
 
     const box = new THREE.Box3().setFromObject(model);
     const size = box.getSize(new THREE.Vector3());
     const center = box.getCenter(new THREE.Vector3());
 
-    // Расчет границ
     const minBounds = box.min.clone().subScalar(CAMERA_BOUNDS_PADDING);
     const maxBounds = box.max.clone().addScalar(CAMERA_BOUNDS_PADDING);
     minBounds.y = Math.max(minBounds.y, 0.1);
     maxBounds.y += CAMERA_BOUNDS_PADDING * 2;
     roomBounds = new THREE.Box3(minBounds, maxBounds);
+
     const targetMin = box.min.clone().addScalar(TARGET_BOUNDS_PADDING);
     const targetMax = box.max.clone().subScalar(TARGET_BOUNDS_PADDING);
     targetMin.y = Math.max(targetMin.y, 0.2);
     targetMax.y = Math.min(targetMax.y, box.max.y - TARGET_BOUNDS_PADDING * 0.5);
     targetBounds = new THREE.Box3(targetMin, targetMax);
 
-    // Настройка контролов
     if (controls) {
         controls.maxDistance = size.length() * 1.5;
         controls.minDistance = 0.3;
@@ -142,7 +271,6 @@ function onLoadModel(gltf) {
         controls.update();
     }
 
-    // АНИМАЦИЯ ПРИЛЕТА К ТОЧКЕ 0
     const startFlyInPos = new THREE.Vector3(center.x, center.y + size.y, center.z + size.length() * 1.2);
     camera.position.copy(startFlyInPos);
     currentWaypointIndex = -1;
@@ -168,19 +296,19 @@ function onLoadModel(gltf) {
             }
             isAnimatingManualStep = false;
 
-            // --- !!! ВЫЗЫВАЕМ ИНИЦИАЛИЗАЦИЮ ФОТО ЗДЕСЬ !!! ---
             console.log("main.js: Вызов initPhotoOverlays() после прилета...");
             initPhotoOverlays();
-            // ----------------------------------------------------
+
+            updateTourButtonsUI();
 
         })
         .start();
 
-} // --- Конец onLoadModel ---
+}
 
-// --- Остальные функции ---
 function onProgress(xhr) { console.log((xhr.loaded / xhr.total * 100) + '% loaded'); }
 function onError(error) { console.error('Ошибка загрузки модели:', error); }
+
 function onWindowResize() {
     if (camera && renderer) {
         camera.aspect = window.innerWidth / window.innerHeight;
@@ -189,20 +317,18 @@ function onWindowResize() {
     }
 }
 
-// --- ИНИЦИАЛИЗАЦИЯ ---
 function init() {
-    // Создаем сцену ДО загрузки модели
     scene = new THREE.Scene();
     scene.background = new THREE.Color(0xffffff);
 
     camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+
     renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setPixelRatio(window.devicePixelRatio);
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     document.body.appendChild(renderer.domElement);
 
-    // Освещение
     const ambientLight = new THREE.AmbientLight(0xffffff, 1.0);
     scene.add(ambientLight);
     const directionalLight1 = new THREE.DirectionalLight(0xffffff, 1.2);
@@ -212,9 +338,8 @@ function init() {
     directionalLight2.position.set(-5, -8, -5);
     scene.add(directionalLight2);
 
-    // Контролы
     controls = new OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = false; // Оставляем damping выключенным для простоты
+    controls.enableDamping = false;
     controls.screenSpacePanning = true;
     controls.enableZoom = true;
     controls.enableRotate = true;
@@ -229,49 +354,43 @@ function init() {
     controls.minPolarAngle = 0;
     controls.maxPolarAngle = Math.PI;
 
-    // Слушатели событий
     controls.addEventListener('start', handleControlStart);
     controls.addEventListener('end', () => { console.log('OrbitControls: Interaction End'); });
     window.addEventListener('keydown', handleKeyPress);
-
-    // Загрузка модели
-    const loader = new GLTFLoader();
-    loader.load('Model/scene.gltf', onLoadModel, onProgress, onError); // Убедись, что путь верный
-
-    // Скрытие кнопки авто-тура
-    const autoplayButton = document.getElementById('autoplayButton');
-    if (autoplayButton) autoplayButton.style.display = 'none';
-
     window.addEventListener('resize', onWindowResize);
-    animate(); // Запуск цикла анимации
+
+    const loader = new GLTFLoader();
+    loader.load(
+        'Model/scene.gltf',
+        onLoadModel,
+        onProgress,
+        onError
+    );
+
+    animate();
 }
 
-// --- ЦИКЛ АНИМАЦИИ ---
 function animate(time) {
     requestAnimationFrame(animate);
     const delta = clock.getDelta();
-    tweenGroup.update(time); // Обновляем TWEEN
 
-    // Вызов колбэков (WASD)
+    tweenGroup.update(time);
+
     for (const callback of animationUpdateCallbacks) {
         callback(delta);
     }
 
-    // Обновление контролов
-    if (controls) {
+    if (controls && controls.enabled) {
         controls.update(delta);
+
+        if (targetBounds && controls.target) {
+            controls.target.clamp(targetBounds.min, targetBounds.max);
+        }
     }
 
-    // Ограничение цели
-    if (controls && controls.enabled && targetBounds && controls.target) {
-        controls.target.clamp(targetBounds.min, targetBounds.max);
-    }
-
-    // Рендеринг
     if (renderer && scene && camera) {
         renderer.render(scene, camera);
     }
 }
 
-// --- ЗАПУСК ---
 init();
